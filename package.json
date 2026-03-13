@@ -4,8 +4,8 @@
   "description": "ddgBooking — Sistema di prenotazione appuntamenti per DDG Solutions. By fotonik.",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && prisma db push --skip-generate && next build",
-    "start": "next start",
+    "build": "prisma generate && next build",
+    "start": "prisma db push --skip-generate && next start",
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
