@@ -1,5 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 import { format, startOfDay, endOfDay, addDays, startOfWeek, endOfWeek } from "date-fns";
 import { it } from "date-fns/locale";

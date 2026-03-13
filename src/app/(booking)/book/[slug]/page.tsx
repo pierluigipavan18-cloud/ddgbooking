@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import { BookingWidget } from "@/components/booking/BookingWidget";
 
 interface PageProps {

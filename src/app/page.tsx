@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Root URL redirects to the default (first active) booking link.
  * ddgbooking.it → ddgbooking.it/book/consulenza-energia
