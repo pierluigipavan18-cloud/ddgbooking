@@ -1,24 +1,31 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { prisma } from "./prisma";
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "587"),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
+const FROM_EMAIL = process.env.EMAIL_FROM || "ddgBooking <noreply@ddg.solutions>";
+
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) {
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
+}
 
 export async function sendEmail(to: string, subject: string, html: string) {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || "ddgBooking <noreply@ddg.solutions>",
+    const { error } = await getResend().emails.send({
+      from: FROM_EMAIL,
       to,
       subject,
       html,
     });
+
+    if (error) {
+      await prisma.emailLog.create({
+        data: { to, subject, status: "failed", error: JSON.stringify(error) },
+      });
+      return { success: false, error };
+    }
 
     await prisma.emailLog.create({
       data: { to, subject, status: "sent", sentAt: new Date() },
@@ -65,14 +72,14 @@ export function buildBookingConfirmationEmail(booking: {
   </div>
 
   <div style="padding: 32px 0;">
-    <h2 style="color: #1a1a1a; margin: 0 0 16px;">Ciao ${booking.guestName}! ✓</h2>
+    <h2 style="color: #1a1a1a; margin: 0 0 16px;">Ciao ${booking.guestName}!</h2>
     <p style="color: #444; line-height: 1.6;">Il tuo appuntamento è confermato.</p>
 
     <div style="background: #f7f9fc; border-radius: 12px; padding: 24px; margin: 24px 0;">
-      <p style="margin: 0 0 8px;"><strong>📅 Data:</strong> ${date}</p>
-      <p style="margin: 0 0 8px;"><strong>🕐 Ora:</strong> ${time}</p>
-      <p style="margin: 0 0 8px;"><strong>👤 Con:</strong> ${booking.agentName}</p>
-      ${booking.meetLink ? `<p style="margin: 0;"><strong>💻 Link:</strong> <a href="${booking.meetLink}" style="color: #0066FF;">${booking.meetLink}</a></p>` : ""}
+      <p style="margin: 0 0 8px;"><strong>Data:</strong> ${date}</p>
+      <p style="margin: 0 0 8px;"><strong>Ora:</strong> ${time}</p>
+      <p style="margin: 0 0 8px;"><strong>Con:</strong> ${booking.agentName}</p>
+      ${booking.meetLink ? `<p style="margin: 0;"><strong>Link:</strong> <a href="${booking.meetLink}" style="color: #0066FF;">${booking.meetLink}</a></p>` : ""}
     </div>
 
     <p style="color: #666; font-size: 14px; line-height: 1.6;">
@@ -122,7 +129,7 @@ export function buildReminderEmail(booking: {
   </div>
 
   <div style="padding: 32px 0;">
-    <h2 style="color: #1a1a1a;">Ciao ${booking.guestName}! 👋</h2>
+    <h2 style="color: #1a1a1a;">Ciao ${booking.guestName}!</h2>
     <p style="color: #444; line-height: 1.6;">
       Ti ricordiamo il tuo appuntamento di <strong>${date}</strong> alle <strong>${time}</strong> con <strong>${booking.agentName}</strong>.
     </p>

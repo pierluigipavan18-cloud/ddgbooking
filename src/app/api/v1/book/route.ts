@@ -1,56 +1,72 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail, buildBookingConfirmationEmail } from "@/lib/email";
+import {
+  sanitizeString,
+  sanitizeEmail,
+  sanitizePhone,
+  sanitizeDatetime,
+  sanitizeSlug,
+} from "@/lib/sanitize";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
 /**
  * POST /api/v1/book
- *
  * Public API for AI agents to create bookings programmatically.
- * Accepts the same data as the booking form but designed for API consumers.
- *
- * Body:
- * {
- *   "slug": "energia",
- *   "agentId": "abc123",
- *   "startTime": "2024-01-15T14:00:00Z",
- *   "endTime": "2024-01-15T14:30:00Z",
- *   "guest": {
- *     "name": "Mario Rossi",
- *     "email": "mario@example.com",
- *     "phone": "+39 333 1234567",
- *     "company": "Rossi Srl"
- *   },
- *   "notes": "Interested in photovoltaic installation",
- *   "privacyConsent": true
- * }
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { slug, agentId, startTime, endTime, guest, notes, privacyConsent } = body;
 
-    // Validate required fields
-    if (!slug || !agentId || !startTime || !endTime || !guest?.name || !guest?.email) {
+    // Sanitize all inputs
+    const slug = sanitizeSlug(body.slug);
+    const agentId = sanitizeString(body.agentId);
+    const startTime = sanitizeDatetime(body.startTime);
+    const endTime = sanitizeDatetime(body.endTime);
+    const guestName = sanitizeString(body.guest?.name);
+    const guestEmail = sanitizeEmail(body.guest?.email);
+    const guestPhone = sanitizePhone(body.guest?.phone);
+    const guestCompany = sanitizeString(body.guest?.company) || null;
+    const notes = sanitizeString(body.notes) || null;
+    const privacyConsent = body.privacyConsent === true;
+
+    if (!slug || !agentId || !startTime || !endTime || !guestName || !guestEmail) {
       return NextResponse.json(
         {
           error: "Missing required fields",
           required: ["slug", "agentId", "startTime", "endTime", "guest.name", "guest.email"],
         },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
 
     if (!privacyConsent) {
       return NextResponse.json(
         { error: "Privacy consent is required (privacyConsent: true)" },
-        { status: 400 }
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
+
+    // Validate time ordering
+    if (new Date(startTime) >= new Date(endTime)) {
+      return NextResponse.json(
+        { error: "endTime must be after startTime" },
+        { status: 400, headers: CORS_HEADERS }
       );
     }
 
     // Find the booking link
     const link = await prisma.bookingLink.findUnique({ where: { slug } });
     if (!link || !link.isActive) {
-      return NextResponse.json({ error: "Booking link not found or inactive" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Booking link not found or inactive" },
+        { status: 404, headers: CORS_HEADERS }
+      );
     }
 
     // Check agent exists and is active
@@ -58,7 +74,21 @@ export async function POST(req: NextRequest) {
       where: { id: agentId, isActive: true },
     });
     if (!agent) {
-      return NextResponse.json({ error: "Agent not found or inactive" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Agent not found or inactive" },
+        { status: 404, headers: CORS_HEADERS }
+      );
+    }
+
+    // Verify agent belongs to this booking link
+    const agentLink = await prisma.bookingLinkAgent.findUnique({
+      where: { bookingLinkId_agentId: { bookingLinkId: link.id, agentId } },
+    });
+    if (!agentLink) {
+      return NextResponse.json(
+        { error: "Agent not assigned to this booking link" },
+        { status: 400, headers: CORS_HEADERS }
+      );
     }
 
     // Check for conflicts
@@ -74,23 +104,23 @@ export async function POST(req: NextRequest) {
     if (conflict) {
       return NextResponse.json(
         { error: "Time slot is no longer available", code: "SLOT_TAKEN" },
-        { status: 409 }
+        { status: 409, headers: CORS_HEADERS }
       );
     }
 
     // Create or update contact
     let contact = await prisma.contact.findFirst({
-      where: { email: guest.email, userId: link.userId },
+      where: { email: guestEmail, userId: link.userId },
     });
 
     if (!contact) {
       contact = await prisma.contact.create({
         data: {
           userId: link.userId,
-          name: guest.name,
-          email: guest.email,
-          phone: guest.phone,
-          company: guest.company,
+          name: guestName,
+          email: guestEmail,
+          phone: guestPhone,
+          company: guestCompany,
           source: "api",
           privacyConsent: true,
           consentDate: new Date(),
@@ -106,10 +136,10 @@ export async function POST(req: NextRequest) {
         contactId: contact.id,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
-        guestName: guest.name,
-        guestEmail: guest.email,
-        guestPhone: guest.phone,
-        guestCompany: guest.company,
+        guestName,
+        guestEmail,
+        guestPhone,
+        guestCompany,
         notes,
         privacyConsent: true,
       },
@@ -126,12 +156,12 @@ export async function POST(req: NextRequest) {
 
     // Send confirmation email
     const emailData = buildBookingConfirmationEmail({
-      guestName: guest.name,
+      guestName,
       agentName: agent.name,
       startTime: new Date(startTime),
       meetLink: booking.meetLink,
     });
-    sendEmail(guest.email, emailData.subject, emailData.html).catch(console.error);
+    sendEmail(guestEmail, emailData.subject, emailData.html).catch(console.error);
 
     return NextResponse.json(
       {
@@ -146,26 +176,17 @@ export async function POST(req: NextRequest) {
         },
         contact: { id: contact.id },
       },
-      {
-        status: 201,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
+      { status: 201, headers: CORS_HEADERS }
     );
   } catch (error) {
     console.error("Booking API error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500, headers: CORS_HEADERS }
+    );
   }
 }
 
 export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
-  });
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }

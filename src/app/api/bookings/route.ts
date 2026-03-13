@@ -2,23 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { sendEmail, buildBookingConfirmationEmail } from "@/lib/email";
+import {
+  sanitizeString,
+  sanitizeEmail,
+  sanitizePhone,
+  sanitizeDatetime,
+} from "@/lib/sanitize";
 
 // POST /api/bookings — Create a new booking (public)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      bookingLinkId,
-      agentId,
-      startTime,
-      endTime,
-      guestName,
-      guestEmail,
-      guestPhone,
-      guestCompany,
-      notes,
-      privacyConsent,
-    } = body;
+
+    // Sanitize all inputs
+    const bookingLinkId = sanitizeString(body.bookingLinkId);
+    const agentId = sanitizeString(body.agentId);
+    const startTime = sanitizeDatetime(body.startTime);
+    const endTime = sanitizeDatetime(body.endTime);
+    const guestName = sanitizeString(body.guestName);
+    const guestEmail = sanitizeEmail(body.guestEmail);
+    const guestPhone = sanitizePhone(body.guestPhone);
+    const guestCompany = sanitizeString(body.guestCompany) || null;
+    const notes = sanitizeString(body.notes) || null;
+    const privacyConsent = body.privacyConsent === true;
 
     if (!bookingLinkId || !agentId || !startTime || !endTime || !guestName || !guestEmail) {
       return NextResponse.json({ error: "Campi obbligatori mancanti" }, { status: 400 });
@@ -27,6 +33,14 @@ export async function POST(req: NextRequest) {
     if (!privacyConsent) {
       return NextResponse.json(
         { error: "È necessario accettare l'informativa sulla privacy" },
+        { status: 400 }
+      );
+    }
+
+    // Validate time ordering
+    if (new Date(startTime) >= new Date(endTime)) {
+      return NextResponse.json(
+        { error: "L'orario di fine deve essere dopo l'orario di inizio" },
         { status: 400 }
       );
     }
@@ -40,6 +54,14 @@ export async function POST(req: NextRequest) {
     const agent = await prisma.agent.findUnique({ where: { id: agentId } });
     if (!agent || !agent.isActive) {
       return NextResponse.json({ error: "Agente non disponibile" }, { status: 404 });
+    }
+
+    // Verify agent belongs to this booking link
+    const agentLink = await prisma.bookingLinkAgent.findUnique({
+      where: { bookingLinkId_agentId: { bookingLinkId, agentId } },
+    });
+    if (!agentLink) {
+      return NextResponse.json({ error: "Agente non associato a questo link" }, { status: 400 });
     }
 
     // Check for conflicts
@@ -78,7 +100,6 @@ export async function POST(req: NextRequest) {
         },
       });
     } else {
-      // Update contact info
       await prisma.contact.update({
         where: { id: contact.id },
         data: {
