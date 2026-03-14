@@ -157,12 +157,11 @@ npm run db:studio    # Open Prisma Studio (DB browser)
 npm run db:seed      # Seed database with sample data
 ```
 
-## Deployment Notes (Railway)
+## Deployment (Railway)
 
-**IMPORTANT — DO NOT modify these settings:**
-- The `start` script in `package.json` uses `next start -H 0.0.0.0`. The `-H 0.0.0.0` flag is **required** for Railway deployment. Without it, Next.js binds to `localhost` and Railway's reverse proxy cannot reach the app. **Never remove the `-H 0.0.0.0` flag.**
-- The `npm warn config production` warning in Railway logs is harmless and comes from Railway's own npm configuration, not from our code. **Do not try to fix it** — it is not a bug in this project.
-- The database is **PostgreSQL** in production (Railway), not SQLite. The Prisma schema already uses the `postgresql` provider.
+- **Host:** Deployed on Railway with a PostgreSQL database (not SQLite).
+- The `start` script uses `next start -H 0.0.0.0`. The `-H 0.0.0.0` flag is **required** — without it Next.js binds to `localhost` and Railway's reverse proxy cannot reach the app. **Never remove it.**
+- Railway sets the `PORT` env var (currently 8080). Next.js picks it up automatically.
 
 ---
 
